@@ -1,0 +1,9 @@
+version = 1
+SPDX-PackageName = "Datasink"
+SPDX-PackageSupplier = "Krishna Iyer (www.krishnaiyer.tech)"
+
+[[annotations]]
+path = ["go.sum", "go.mod", ".gitignore", "README.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025 Krishna Iyer (www.krishnaiyer.tech)"
+SPDX-License-Identifier = "Apache-2.0"
