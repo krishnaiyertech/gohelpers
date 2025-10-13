@@ -7,6 +7,8 @@ package logger
 import (
 	"context"
 	"fmt"
+
+	"krishnaiyer.tech/golang/gohelpers/logger/wrappers"
 )
 
 type loggerKeyType string
@@ -35,17 +37,6 @@ const (
 	defaultType = TypeSLog
 )
 
-// Log provides logging functions.
-type Log interface {
-	Info(string)
-	Debug(string)
-	Warn(string)
-	Error(string)
-	Fatal(string)
-
-	Shutdown(context.Context) error
-}
-
 // Option is a configuration option.
 type Option func(*Logger)
 
@@ -60,7 +51,7 @@ type Logger struct {
 	level Level
 	typ   Type
 
-	impl Log
+	impl wrappers.Log
 	tags []Tag
 }
 
@@ -114,7 +105,7 @@ func WithDebug() Option {
 }
 
 // WithCustomLogger adds a custom logger. This is primarily used for testing.
-func WithCustomLogger(logger Log) Option {
+func WithCustomLogger(logger wrappers.Log) Option {
 	return Option(func(l *Logger) {
 		l.impl = logger
 	})
