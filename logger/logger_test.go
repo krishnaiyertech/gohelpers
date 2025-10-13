@@ -69,27 +69,6 @@ func TestNewPanicOnInvalidType(t *testing.T) {
 	})
 }
 
-func TestWithLogLevel(t *testing.T) {
-	for _, tt := range []struct {
-		name         string
-		level        Level
-		want         Level
-		originalWant Level
-	}{
-		{name: "ValidError", level: LevelError, want: LevelError, originalWant: defaultLevel},
-		{name: "ValidDebug", level: LevelDebug, want: LevelDebug, originalWant: defaultLevel},
-		{name: "InvalidHigh", level: Level(99), want: defaultLevel, originalWant: defaultLevel},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			logger := &Logger{level: tt.originalWant}
-			WithLogLevel(tt.level)(logger)
-			if logger.level != tt.want {
-				t.Fatalf("expected level %d, got %d", tt.want, logger.level)
-			}
-		})
-	}
-}
-
 func TestWithType(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -130,6 +109,10 @@ func TestLoggerWithTag(t *testing.T) {
 	if len(base.tags) != 1 {
 		t.Fatalf("base logger tags mutated: %d", len(base.tags))
 	}
+	derived.tags[0].Value = "mutated"
+	if base.tags[0].Value != "tag" {
+		t.Fatalf("base tags should not be modified by derived changes")
+	}
 	if derived.impl != base.impl {
 		t.Fatalf("expected impl to be shared")
 	}
@@ -158,6 +141,10 @@ func TestLoggerWithTags(t *testing.T) {
 	}
 	if len(base.tags) != 1 {
 		t.Fatalf("base logger tags mutated: %d", len(base.tags))
+	}
+	derived.tags[0].Value = "mutated"
+	if base.tags[0].Value != "tag" {
+		t.Fatalf("base tags should not be modified by derived changes")
 	}
 }
 
@@ -193,7 +180,7 @@ func TestLoggerLogMethods(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			stub := &stubLog{}
 			ctx := context.Background()
-			logger := New(ctx, WithCustomLogger(stub))
+			logger := New(ctx, WithCustomLogger(stub), WithDebug())
 			t.Cleanup(func() {
 				_ = logger.Shutdown(ctx)
 			})
@@ -203,6 +190,64 @@ func TestLoggerLogMethods(t *testing.T) {
 			}
 			if stub.calls[0] != tt.want {
 				t.Fatalf("expected call %q, got %q", tt.want, stub.calls[0])
+			}
+		})
+	}
+}
+
+func TestLevelOptions(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		option   Option
+		expected Level
+	}{
+		{name: "WithError", option: WithError(), expected: LevelDebug},
+		{name: "WithWarn", option: WithWarn(), expected: LevelDebug},
+		{name: "WithDebug", option: WithDebug(), expected: LevelDebug},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := &Logger{level: LevelInfo}
+			tt.option(logger)
+			if logger.level != tt.expected {
+				t.Fatalf("expected level %d, got %d", tt.expected, logger.level)
+			}
+		})
+	}
+}
+
+func TestLoggerLevelGating(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		level       Level
+		invoke      func(*Logger, string)
+		message     string
+		expectCalls int
+		wantCall    string
+	}{
+		{name: "InfoSuppressedBelowThreshold", level: LevelWarn, invoke: (*Logger).Info, message: "info", expectCalls: 0},
+		{name: "InfoEmittedAtThreshold", level: LevelInfo, invoke: (*Logger).Info, message: "info", expectCalls: 1, wantCall: "Info:info"},
+		{name: "DebugSuppressedWithoutDebug", level: LevelInfo, invoke: (*Logger).Debug, message: "debug", expectCalls: 0},
+		{name: "DebugEmittedWithDebugLevel", level: LevelDebug, invoke: (*Logger).Debug, message: "debug", expectCalls: 1, wantCall: "Debug:debug"},
+		{name: "WarnSuppressedBelowThreshold", level: LevelError, invoke: (*Logger).Warn, message: "warn", expectCalls: 0},
+		{name: "WarnEmittedAtThreshold", level: LevelWarn, invoke: (*Logger).Warn, message: "warn", expectCalls: 1, wantCall: "Warn:warn"},
+		{name: "ErrorAlwaysEmitted", level: LevelError, invoke: (*Logger).Error, message: "error", expectCalls: 1, wantCall: "Error:error"},
+		{name: "FatalAlwaysEmitted", level: LevelError, invoke: (*Logger).Fatal, message: "fatal", expectCalls: 1, wantCall: "Fatal:fatal"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := &stubLog{}
+			ctx := context.Background()
+			logger := New(ctx, WithCustomLogger(stub), func(l *Logger) {
+				l.level = tt.level
+			})
+			t.Cleanup(func() {
+				_ = logger.Shutdown(ctx)
+			})
+			tt.invoke(logger, tt.message)
+			if len(stub.calls) != tt.expectCalls {
+				t.Fatalf("expected %d calls, got %d", tt.expectCalls, len(stub.calls))
+			}
+			if tt.expectCalls == 1 && stub.calls[0] != tt.wantCall {
+				t.Fatalf("expected call %q, got %q", tt.wantCall, stub.calls[0])
 			}
 		})
 	}

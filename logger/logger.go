@@ -92,13 +92,24 @@ func (l *Logger) Shutdown(ctx context.Context) error {
 	return l.impl.Shutdown(ctx)
 }
 
-// WithLogLevel sets the level of the logger. Undefined levels are ignored.
-// Fatal messages are always logged.
-func WithLogLevel(level Level) Option {
+// WithError configures the logger to only print error messages.
+func WithError() Option {
 	return Option(func(l *Logger) {
-		if level <= LevelDebug {
-			l.level = level
-		}
+		l.level = LevelDebug
+	})
+}
+
+// WithWarn configures the logger to only print warning messages.
+func WithWarn() Option {
+	return Option(func(l *Logger) {
+		l.level = LevelDebug
+	})
+}
+
+// WithDebug allows the logger to print debug messages.
+func WithDebug() Option {
+	return Option(func(l *Logger) {
+		l.level = LevelDebug
 	})
 }
 
@@ -124,8 +135,9 @@ func (l *Logger) WithTag(key string, val any) *Logger {
 	logger := &Logger{
 		impl:  l.impl,
 		level: l.level,
-		tags:  l.tags,
+		tags:  make([]Tag, len(l.tags)),
 	}
+	copy(logger.tags, l.tags)
 	logger.tags = append(logger.tags, Tag{
 		Key:   key,
 		Value: val,
@@ -142,8 +154,9 @@ func (l *Logger) WithTags(args ...any) (*Logger, error) {
 	logger := &Logger{
 		impl:  l.impl,
 		level: l.level,
-		tags:  l.tags,
+		tags:  make([]Tag, len(l.tags)),
 	}
+	copy(logger.tags, l.tags)
 	// Read the args in pairs and create tags.
 	for i := 0; i < len(args)-1; i = i + 2 {
 		key, ok := args[i].(string)
@@ -160,22 +173,32 @@ func (l *Logger) WithTags(args ...any) (*Logger, error) {
 
 // Info logs informational messages.
 func (l *Logger) Info(msg string) {
-	l.impl.Info(msg)
+	if l.level >= LevelInfo {
+		l.impl.Info(msg)
+	}
 }
 
 // Debug logs debugging messages.
 func (l *Logger) Debug(msg string) {
-	l.impl.Debug(msg)
+	if l.level >= LevelDebug {
+		l.impl.Debug(msg)
+	}
 }
 
 // Warn logs warnings.
 func (l *Logger) Warn(msg string) {
-	l.impl.Warn(msg)
+	if l.level >= LevelWarn {
+		l.impl.Warn(msg)
+	}
 }
 
 // Error logs errors.
 func (l *Logger) Error(msg string) {
-	l.impl.Error(msg)
+	// In theory since LevelError is 0, it should always be printed.
+	// This check is just for consistency.
+	if l.level >= LevelError {
+		l.impl.Error(msg)
+	}
 }
 
 // Fatal logs fatal messages.
