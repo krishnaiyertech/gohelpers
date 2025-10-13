@@ -49,6 +49,12 @@ type Log interface {
 // Option is a configuration option.
 type Option func(*Logger)
 
+// Tag is a key value pair optionally attached to a logger or a message.
+type Tag struct {
+	Key   string
+	Value any
+}
+
 // Logger abstracts the underlying logger implementation.
 type Logger struct {
 	level Level
@@ -93,6 +99,13 @@ func WithLogLevel(level Level) Option {
 		if level <= LevelDebug {
 			l.level = level
 		}
+	})
+}
+
+// WithCustomLogger adds a custom logger. This is primarily used for testing.
+func WithCustomLogger(logger Log) Option {
+	return Option(func(l *Logger) {
+		l.impl = logger
 	})
 }
 
@@ -143,4 +156,29 @@ func (l *Logger) WithTags(args ...any) (*Logger, error) {
 		})
 	}
 	return logger, nil
+}
+
+// Info logs informational messages.
+func (l *Logger) Info(msg string) {
+	l.impl.Info(msg)
+}
+
+// Debug logs debugging messages.
+func (l *Logger) Debug(msg string) {
+	l.impl.Debug(msg)
+}
+
+// Warn logs warnings.
+func (l *Logger) Warn(msg string) {
+	l.impl.Warn(msg)
+}
+
+// Error logs errors.
+func (l *Logger) Error(msg string) {
+	l.impl.Error(msg)
+}
+
+// Fatal logs fatal messages.
+func (l *Logger) Fatal(msg string) {
+	l.impl.Fatal(msg)
 }
