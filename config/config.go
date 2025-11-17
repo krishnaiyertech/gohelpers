@@ -240,7 +240,8 @@ func processStruct(nameTag string, fs *pflag.FlagSet, v reflect.Value, prefix st
 				fs.Float64Var(fieldPtr.(*float64), fullName, fieldValue.Float(), description)
 			}
 		case reflect.Slice:
-			if fieldValue.Type().Elem().Kind() == reflect.String {
+			switch fieldValue.Type().Elem().Kind() {
+			case reflect.String:
 				defaultValue := make([]string, fieldValue.Len())
 				for j := 0; j < fieldValue.Len(); j++ {
 					defaultValue[j] = fieldValue.Index(j).String()
@@ -250,7 +251,17 @@ func processStruct(nameTag string, fs *pflag.FlagSet, v reflect.Value, prefix st
 				} else {
 					fs.StringSliceVar(fieldPtr.(*[]string), fullName, defaultValue, description)
 				}
-			} else {
+			case reflect.Int:
+				defaultValue := make([]int, fieldValue.Len())
+				for j := 0; j < fieldValue.Len(); j++ {
+					defaultValue[j] = int(fieldValue.Index(j).Int())
+				}
+				if short != "" {
+					fs.IntSliceVarP(fieldPtr.(*[]int), fullName, short, defaultValue, description)
+				} else {
+					fs.IntSliceVar(fieldPtr.(*[]int), fullName, defaultValue, description)
+				}
+			default:
 				return fmt.Errorf("unsupported slice type %s for field %s", fieldValue.Type(), field.Name)
 			}
 		case reflect.Map:

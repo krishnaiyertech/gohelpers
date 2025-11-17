@@ -629,7 +629,7 @@ func TestProcessStructAllTypes(t *testing.T) {
 // Test unsupported slice types
 func TestProcessStructUnsupportedSlice(t *testing.T) {
 	type UnsupportedSliceConfig struct {
-		IntSlice []int `name:"intslice" description:"Unsupported int slice"`
+		Float64Slice []float64 `name:"float64slice" description:"Unsupported float64 slice"`
 	}
 
 	config := &UnsupportedSliceConfig{}
@@ -1185,5 +1185,241 @@ func TestProcessStructComprehensiveCoverage(t *testing.T) {
 		if flags.Lookup(flagName) == nil {
 			t.Errorf("Flag '%s' not found", flagName)
 		}
+	}
+}
+
+// Test []int slice support
+func TestProcessStructIntSlice(t *testing.T) {
+	for _, test := range []struct {
+		Name          string
+		Config        any
+		ExpectedFlags []string
+		ValidateValue func(t *testing.T, flags *pflag.FlagSet)
+	}{
+		{
+			Name: "EmptyIntSlice",
+			Config: &struct {
+				Ports []int `name:"ports" description:"Port numbers"`
+			}{},
+			ExpectedFlags: []string{"ports"},
+			ValidateValue: func(t *testing.T, flags *pflag.FlagSet) {
+				flag := flags.Lookup("ports")
+				if flag == nil {
+					t.Fatal("Expected ports flag to be created")
+				}
+				if flag.Value.Type() != "intSlice" {
+					t.Errorf("Expected intSlice type, got %s", flag.Value.Type())
+				}
+			},
+		},
+		{
+			Name: "IntSliceWithDefaults",
+			Config: &struct {
+				Ports []int `name:"ports" description:"Port numbers"`
+			}{
+				Ports: []int{8080, 9090, 3000},
+			},
+			ExpectedFlags: []string{"ports"},
+			ValidateValue: func(t *testing.T, flags *pflag.FlagSet) {
+				flag := flags.Lookup("ports")
+				if flag == nil {
+					t.Fatal("Expected ports flag to be created")
+				}
+				defaultValue := flag.DefValue
+				if !strings.Contains(defaultValue, "8080") {
+					t.Errorf("Expected default value to contain 8080, got: %s", defaultValue)
+				}
+			},
+		},
+		{
+			Name: "IntSliceWithShortFlag",
+			Config: &struct {
+				Ports []int `name:"ports" short:"p" description:"Port numbers"`
+			}{
+				Ports: []int{443, 80},
+			},
+			ExpectedFlags: []string{"ports"},
+			ValidateValue: func(t *testing.T, flags *pflag.FlagSet) {
+				flag := flags.Lookup("ports")
+				if flag == nil {
+					t.Fatal("Expected ports flag to be created")
+				}
+				if flag.Shorthand != "p" {
+					t.Errorf("Expected shorthand 'p', got '%s'", flag.Shorthand)
+				}
+			},
+		},
+	} {
+		test := test
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			v := reflect.ValueOf(test.Config).Elem()
+
+			err := processStruct("name", flags, v, "")
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			for _, flagName := range test.ExpectedFlags {
+				if flags.Lookup(flagName) == nil {
+					t.Errorf("Flag '%s' not found", flagName)
+				}
+			}
+
+			if test.ValidateValue != nil {
+				test.ValidateValue(t, flags)
+			}
+		})
+	}
+}
+
+// Test []int in complex config
+func TestIntSliceInComplexConfig(t *testing.T) {
+	type ServerConfig struct {
+		Ports []int `name:"ports" short:"p" description:"Server ports"`
+	}
+
+	type AppConfig struct {
+		Name   string       `name:"name" description:"App name"`
+		Server ServerConfig `name:"server"`
+	}
+
+	config := &AppConfig{
+		Name: "myapp",
+		Server: ServerConfig{
+			Ports: []int{8080, 8443},
+		},
+	}
+
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	v := reflect.ValueOf(config).Elem()
+
+	err := processStruct("name", flags, v, "")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Check nested flag was created with correct name
+	flag := flags.Lookup("server.ports")
+	if flag == nil {
+		t.Fatal("Expected server.ports flag to be created")
+	}
+
+	if flag.Value.Type() != "intSlice" {
+		t.Errorf("Expected intSlice type, got %s", flag.Value.Type())
+	}
+}
+
+// Test parsing []int from config file
+func TestParseConfigurationWithIntSlice(t *testing.T) {
+	type ConfigWithIntSlice struct {
+		Name  string `name:"name" short:"n" description:"App name"`
+		Ports []int  `name:"ports" description:"Port list"`
+	}
+
+	for _, test := range []struct {
+		Name       string
+		ConfigData string
+		CmdArgs    []string
+		Validate   func(t *testing.T, config *ConfigWithIntSlice)
+	}{
+		{
+			Name: "IntSliceFromConfigFile",
+			ConfigData: `
+name: "test-app"
+ports:
+  - 8080
+  - 9090
+  - 3000
+`,
+			CmdArgs: []string{},
+			Validate: func(t *testing.T, config *ConfigWithIntSlice) {
+				if config.Name != "test-app" {
+					t.Errorf("Expected name 'test-app', got '%s'", config.Name)
+				}
+				expectedPorts := []int{8080, 9090, 3000}
+				if len(config.Ports) != len(expectedPorts) {
+					t.Errorf("Expected %d ports, got %d", len(expectedPorts), len(config.Ports))
+				}
+				for i, port := range expectedPorts {
+					if config.Ports[i] != port {
+						t.Errorf("Expected port[%d] to be %d, got %d", i, port, config.Ports[i])
+					}
+				}
+			},
+		},
+		{
+			Name: "IntSliceWithShortFlag",
+			ConfigData: `
+name: "from-config"
+ports:
+  - 8080
+  - 9090
+`,
+			CmdArgs: []string{"-n", "updated-name"},
+			Validate: func(t *testing.T, config *ConfigWithIntSlice) {
+				// Name should be overridden by flag
+				if config.Name != "updated-name" {
+					t.Errorf("Expected name 'updated-name', got '%s'", config.Name)
+				}
+				// Ports should come from config file
+				expectedPorts := []int{8080, 9090}
+				if len(config.Ports) != len(expectedPorts) {
+					t.Errorf("Expected %d ports, got %d", len(expectedPorts), len(config.Ports))
+				}
+				for i, port := range expectedPorts {
+					if config.Ports[i] != port {
+						t.Errorf("Expected port[%d] to be %d, got %d", i, port, config.Ports[i])
+					}
+				}
+			},
+		},
+		{
+			Name: "EmptyIntSliceFromConfig",
+			ConfigData: `
+name: "test-app"
+ports: []
+`,
+			CmdArgs: []string{},
+			Validate: func(t *testing.T, config *ConfigWithIntSlice) {
+				if len(config.Ports) != 0 {
+					t.Errorf("Expected empty ports slice, got %d elements", len(config.Ports))
+				}
+			},
+		},
+	} {
+		test := test
+		t.Run(test.Name, func(t *testing.T) {
+			config := &ConfigWithIntSlice{}
+			configPath := createTempConfigFile(t, test.ConfigData)
+
+			manager, err := New(config, "")
+			if err != nil {
+				t.Fatalf("Failed to create manager: %v", err)
+			}
+
+			cmd := &cobra.Command{
+				Use: "test",
+			}
+			cmd.Flags().AddFlagSet(manager.FlagSet())
+
+			allArgs := append([]string{"--config", configPath}, test.CmdArgs...)
+			cmd.SetArgs(allArgs)
+			if err := cmd.ParseFlags(allArgs); err != nil {
+				t.Fatalf("Failed to parse flags: %v", err)
+			}
+
+			manager.configFile = configPath
+			err = manager.ParseConfiguration(cmd)
+			if err != nil {
+				t.Fatalf("ParseConfiguration failed: %v", err)
+			}
+
+			if test.Validate != nil {
+				test.Validate(t, config)
+			}
+		})
 	}
 }
