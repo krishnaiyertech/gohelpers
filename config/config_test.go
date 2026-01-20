@@ -1312,6 +1312,277 @@ func TestIntSliceInComplexConfig(t *testing.T) {
 	}
 }
 
+// Test map[string][]string support
+func TestProcessStructStringToStringSliceMap(t *testing.T) {
+	for _, test := range []struct {
+		Name          string
+		Config        any
+		ExpectedFlags []string
+		ValidateValue func(t *testing.T, flags *pflag.FlagSet)
+	}{
+		{
+			Name: "EmptyStringToStringSliceMap",
+			Config: &struct {
+				Headers map[string][]string `name:"headers" description:"HTTP headers"`
+			}{},
+			ExpectedFlags: []string{},
+			ValidateValue: func(t *testing.T, flags *pflag.FlagSet) {
+				// map[string][]string does not create a flag (pflag doesn't support it)
+				// but it should not error either
+				if flags.Lookup("headers") != nil {
+					t.Error("Did not expect headers flag to be created (pflag doesn't support StringToStringSlice)")
+				}
+			},
+		},
+		{
+			Name: "StringToStringSliceMapWithDefaults",
+			Config: &struct {
+				Headers map[string][]string `name:"headers" description:"HTTP headers"`
+			}{
+				Headers: map[string][]string{
+					"Accept":       {"application/json", "text/html"},
+					"Content-Type": {"application/json"},
+				},
+			},
+			ExpectedFlags: []string{},
+			ValidateValue: func(t *testing.T, flags *pflag.FlagSet) {
+				// Should not create a flag, but should not error either
+				if flags.Lookup("headers") != nil {
+					t.Error("Did not expect headers flag to be created")
+				}
+			},
+		},
+		{
+			Name: "StringToStringSliceMapWithShortFlag",
+			Config: &struct {
+				Headers map[string][]string `name:"headers" short:"H" description:"HTTP headers"`
+			}{
+				Headers: map[string][]string{
+					"X-Custom": {"value1", "value2"},
+				},
+			},
+			ExpectedFlags: []string{},
+			ValidateValue: func(t *testing.T, flags *pflag.FlagSet) {
+				// Should not create a flag even with short flag specified
+				if flags.Lookup("headers") != nil {
+					t.Error("Did not expect headers flag to be created")
+				}
+				if flags.ShorthandLookup("H") != nil {
+					t.Error("Did not expect shorthand 'H' to be created")
+				}
+			},
+		},
+	} {
+		test := test
+		t.Run(test.Name, func(t *testing.T) {
+			t.Parallel()
+
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			v := reflect.ValueOf(test.Config).Elem()
+
+			err := processStruct("name", flags, v, "")
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			for _, flagName := range test.ExpectedFlags {
+				if flags.Lookup(flagName) == nil {
+					t.Errorf("Flag '%s' not found", flagName)
+				}
+			}
+
+			if test.ValidateValue != nil {
+				test.ValidateValue(t, flags)
+			}
+		})
+	}
+}
+
+// Test map[string][]string in complex config
+func TestStringToStringSliceMapInComplexConfig(t *testing.T) {
+	type ServerConfig struct {
+		Headers map[string][]string `name:"headers" description:"Server headers"`
+		Port    int                 `name:"port" description:"Server port"`
+	}
+
+	type AppConfig struct {
+		Name   string       `name:"name" description:"App name"`
+		Server ServerConfig `name:"server"`
+	}
+
+	config := &AppConfig{
+		Name: "myapp",
+		Server: ServerConfig{
+			Headers: map[string][]string{
+				"X-App-Name": {"myapp"},
+				"X-Versions": {"v1", "v2"},
+			},
+			Port: 8080,
+		},
+	}
+
+	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	v := reflect.ValueOf(config).Elem()
+
+	err := processStruct("name", flags, v, "")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+
+	// Check that the nested port flag was created
+	portFlag := flags.Lookup("server.port")
+	if portFlag == nil {
+		t.Error("Expected server.port flag to be created")
+	}
+
+	// Check that map[string][]string did not create a flag
+	headersFlag := flags.Lookup("server.headers")
+	if headersFlag != nil {
+		t.Error("Did not expect server.headers flag to be created")
+	}
+
+	// Check name flag was created
+	nameFlag := flags.Lookup("name")
+	if nameFlag == nil {
+		t.Error("Expected name flag to be created")
+	}
+}
+
+// Test parsing map[string][]string from config file
+func TestParseConfigurationWithStringToStringSliceMap(t *testing.T) {
+	type ConfigWithStringSliceMap struct {
+		Name    string              `name:"name" short:"n" description:"App name"`
+		Headers map[string][]string `name:"headers" description:"HTTP headers map"`
+	}
+
+	for _, test := range []struct {
+		Name       string
+		ConfigData string
+		CmdArgs    []string
+		Validate   func(t *testing.T, config *ConfigWithStringSliceMap)
+	}{
+		{
+			Name: "StringToStringSliceMapFromConfigFile",
+			ConfigData: `
+name: "test-app"
+headers:
+  Accept:
+    - "application/json"
+    - "text/html"
+  Content-Type:
+    - "application/json"
+  X-Custom-Header:
+    - "value1"
+    - "value2"
+    - "value3"
+`,
+			CmdArgs: []string{},
+			Validate: func(t *testing.T, config *ConfigWithStringSliceMap) {
+				if config.Name != "test-app" {
+					t.Errorf("Expected name 'test-app', got '%s'", config.Name)
+				}
+				if len(config.Headers) != 3 {
+					t.Errorf("Expected 3 header keys, got %d", len(config.Headers))
+				}
+				acceptValues := config.Headers["Accept"]
+				if len(acceptValues) != 2 || acceptValues[0] != "application/json" || acceptValues[1] != "text/html" {
+					t.Errorf("Expected Accept values [application/json, text/html], got %v", acceptValues)
+				}
+				contentTypeValues := config.Headers["Content-Type"]
+				if len(contentTypeValues) != 1 || contentTypeValues[0] != "application/json" {
+					t.Errorf("Expected Content-Type values [application/json], got %v", contentTypeValues)
+				}
+				customValues := config.Headers["X-Custom-Header"]
+				if len(customValues) != 3 {
+					t.Errorf("Expected 3 X-Custom-Header values, got %d", len(customValues))
+				}
+			},
+		},
+		{
+			Name: "StringToStringSliceMapWithFlagOverride",
+			ConfigData: `
+name: "from-config"
+headers:
+  Accept:
+    - "text/plain"
+`,
+			CmdArgs: []string{"-n", "from-flag"},
+			Validate: func(t *testing.T, config *ConfigWithStringSliceMap) {
+				// Name should be overridden by flag
+				if config.Name != "from-flag" {
+					t.Errorf("Expected name 'from-flag', got '%s'", config.Name)
+				}
+				// Headers should come from config file
+				if len(config.Headers) != 1 {
+					t.Errorf("Expected 1 header key, got %d", len(config.Headers))
+				}
+				acceptValues := config.Headers["Accept"]
+				if len(acceptValues) != 1 || acceptValues[0] != "text/plain" {
+					t.Errorf("Expected Accept values [text/plain], got %v", acceptValues)
+				}
+			},
+		},
+		{
+			Name: "EmptyStringToStringSliceMapFromConfig",
+			ConfigData: `
+name: "test-app"
+headers: {}
+`,
+			CmdArgs: []string{},
+			Validate: func(t *testing.T, config *ConfigWithStringSliceMap) {
+				if len(config.Headers) != 0 {
+					t.Errorf("Expected empty headers map, got %d elements", len(config.Headers))
+				}
+			},
+		},
+		{
+			Name: "NilStringToStringSliceMapFromConfig",
+			ConfigData: `
+name: "test-app"
+`,
+			CmdArgs: []string{},
+			Validate: func(t *testing.T, config *ConfigWithStringSliceMap) {
+				// Headers should be nil when not specified in config
+				if config.Headers != nil {
+					t.Errorf("Expected nil headers map, got %v", config.Headers)
+				}
+			},
+		},
+	} {
+		test := test
+		t.Run(test.Name, func(t *testing.T) {
+			config := &ConfigWithStringSliceMap{}
+			configPath := createTempConfigFile(t, test.ConfigData)
+
+			manager, err := New(config, "")
+			if err != nil {
+				t.Fatalf("Failed to create manager: %v", err)
+			}
+
+			cmd := &cobra.Command{
+				Use: "test",
+			}
+			cmd.Flags().AddFlagSet(manager.FlagSet())
+
+			allArgs := append([]string{"--config", configPath}, test.CmdArgs...)
+			cmd.SetArgs(allArgs)
+			if err := cmd.ParseFlags(allArgs); err != nil {
+				t.Fatalf("Failed to parse flags: %v", err)
+			}
+
+			manager.configFile = configPath
+			err = manager.ParseConfiguration(cmd)
+			if err != nil {
+				t.Fatalf("ParseConfiguration failed: %v", err)
+			}
+
+			if test.Validate != nil {
+				test.Validate(t, config)
+			}
+		})
+	}
+}
+
 // Test parsing []int from config file
 func TestParseConfigurationWithIntSlice(t *testing.T) {
 	type ConfigWithIntSlice struct {

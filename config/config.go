@@ -277,6 +277,26 @@ func processStruct(nameTag string, fs *pflag.FlagSet, v reflect.Value, prefix st
 				} else {
 					fs.StringToStringVar(fieldPtr.(*map[string]string), fullName, defaultValue, description)
 				}
+			} else if fieldValue.Type().Key().Kind() == reflect.String &&
+				fieldValue.Type().Elem().Kind() == reflect.Slice &&
+				fieldValue.Type().Elem().Elem().Kind() == reflect.String {
+				defaultValue := make(map[string][]string)
+				if !fieldValue.IsNil() {
+					for _, key := range fieldValue.MapKeys() {
+						val := fieldValue.MapIndex(key)
+						slice := make([]string, val.Len())
+						for j := 0; j < val.Len(); j++ {
+							slice[j] = val.Index(j).String()
+						}
+						defaultValue[key.String()] = slice
+					}
+				}
+				// Note: pflag does not have a built-in StringToStringSlice type,
+				// so map[string][]string fields will be populated from the config file only.
+				_ = defaultValue // Suppress unused variable warning
+				_ = fullName
+				_ = short
+				_ = description
 			} else {
 				return fmt.Errorf("unsupported map type %s for field %s", fieldValue.Type(), field.Name)
 			}
