@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright 2025 Krishna Iyer (www.krishnaiyer.tech)
+// SPDX-FileCopyrightText: Copyright 2026 Krishna Iyer (www.ekri.sh)
 // SPDX-License-Identifier: Apache-2.0
 
 // Package logger adds and retrieves a logger from context.
